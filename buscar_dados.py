@@ -1,65 +1,98 @@
+"""
+buscar_dados.py
+Responsabilidade: orquestrar a coleta paginada e a persistência no banco.
+Usa PncpApiClient para consultar a API e salvar_dados para persistir.
+"""
 import json
-import time
 
 import salvar_dados
-from fetch_retry import fetch_com_retry
+from pncp_client import PncpApiClient
 
 
-def buscar_dados_paginados(url_completa, parametros, nome_db="pncp_data.db"):
-    """
-    Busca todos os dados da API PNCP usando paginação e salva no DB a cada iteração.
-    (Versão atualizada para mostrar o progresso X de Y)
-    """
+class PncpColetorService:
+    """Orquestra a coleta paginada da API PNCP e a persistência no banco."""
 
-    pagina_atual = 1
-    total_registros_processados = 0
+    def __init__(self, cliente: PncpApiClient, nome_db: str = "pncp_data.db") -> None:
+        """
+        Inicializa o serviço de coleta.
 
-    # Variável para armazenar o total de páginas
-    total_paginas_api = '???'  # Começa como desconhecido
+        Args:
+            cliente: Instância de PncpApiClient responsável pelas requisições.
+            nome_db: Caminho do arquivo SQLite onde os dados serão salvos.
+        """
+        self.cliente = cliente
+        self.nome_db = nome_db
 
-    print("--- INICIANDO BUSCA PAGINADA ---")
-
-    while True:
-        # 1. Preparar parâmetros
-        params_paginados = parametros.copy()
-        params_paginados['pagina'] = pagina_atual
-
-        print(f"\n>>>> BUSCANDO PÁGINA: {pagina_atual} de {total_paginas_api}")
-
-        # 2. Chamar a função de busca (espera uma tupla (dados, total_paginas) ou None)
-        retorno_fetch = fetch_com_retry(url_completa, params_paginados)
-
-        # 3. Verificar condição de parada: None (erro)
-        if retorno_fetch is None:
-            print(f"Fim dos dados ou erro (fetch_com_retry retornou None) na página {pagina_atual}. FIM DA BUSCA.")
-            break
-
-        # Desempacotar a tupla
-        dados_pagina, total_paginas_resposta = retorno_fetch
-
-        # Atualizar o total de páginas se informado
-        if total_paginas_resposta is not None:
-            total_paginas_api = total_paginas_resposta
-
-        # Verificar condição de parada: lista vazia
-        if not dados_pagina:
-            print(f"Fim dos dados (lista vazia recebida) na página {pagina_atual}. FIM DA BUSCA.")
-            break
-
-        # 4. PERSISTÊNCIA: Salvar no Banco de Dados
-        salvar_dados.inserir_dados(nome_db, dados_pagina, pagina_atual)
-        total_registros_processados += len(dados_pagina)
-
-        # 5. Visualizar a página (em tempo real)
-        print(f"Dados recebidos (Página {pagina_atual}/{total_paginas_api}, {len(dados_pagina)} registros):")
-        json_formatado = json.dumps(dados_pagina[:3], indent=4, ensure_ascii=False)
-        print(json_formatado)
+    def _log_pagina(self, resultado: dict) -> None:
+        """Exibe resumo da página recebida (primeiros 3 itens)."""
+        pagina = resultado['pagina']
+        total_paginas = resultado['total_paginas'] or '???'
+        dados = resultado['dados']
+        resumo = json.dumps(dados[:3], indent=4, ensure_ascii=False)
+        print(f"Página {pagina}/{total_paginas} — {len(dados)} registros:")
+        print(resumo)
         print("   -> (JSON truncado, salvamento completo e indexado no DB)")
 
-        # 6. Incrementar e prosseguir
-        pagina_atual += 1
-        time.sleep(0.5)  # Pausa recomendada
+    def processar_pagina(self, resultado: dict) -> int:
+        """
+        Persiste os dados de uma página e exibe log resumido.
 
-    print("\n--- BUSCA CONCLUÍDA ---")
-    print(f"Total de registros processados: {total_registros_processados}")
+        Args:
+            resultado: Dict retornado por PncpApiClient.buscar_pagina().
+
+        Returns:
+            Quantidade de registros na página processada.
+        """
+        dados = resultado['dados']
+        salvar_dados.inserir_dados(self.nome_db, dados, resultado['pagina'])
+        self._log_pagina(resultado)
+        return len(dados)
+
+    def executar_coleta(self, params_base: dict, pagina_inicial: int = 1) -> int:
+        """
+        Executa a coleta paginada completa.
+
+        Args:
+            params_base: Parâmetros base da requisição (sem 'pagina').
+            pagina_inicial: Página a partir da qual iniciar a coleta.
+
+        Returns:
+            Total de registros processados.
+        """
+        total_registros = 0
+        print("--- INICIANDO BUSCA PAGINADA ---")
+
+        for resultado in self.cliente.iterar_paginas(params_base, pagina_inicial):
+            pagina = resultado['pagina']
+            total_paginas = resultado['total_paginas'] or '???'
+            print(f"\n>>>> PROCESSANDO PÁGINA: {pagina} de {total_paginas}")
+            total_registros += self.processar_pagina(resultado)
+
+        print("\n--- BUSCA CONCLUÍDA ---")
+        print(f"Total de registros processados: {total_registros}")
+        return total_registros
+
+
+# --- Fachada: mantém compatibilidade com o notebook e código existente ---
+
+def buscar_dados_paginados(
+    url_completa: str,
+    parametros: dict,
+    nome_db: str = "pncp_data.db",
+) -> bool:
+    """
+    Fachada que preserva a assinatura original.
+    Instancia PncpApiClient e PncpColetorService e executa a coleta.
+
+    Args:
+        url_completa: URL completa do endpoint da API.
+        parametros: Parâmetros base da requisição.
+        nome_db: Caminho do arquivo SQLite.
+
+    Returns:
+        True ao concluir.
+    """
+    cliente = PncpApiClient(base_url=url_completa)
+    servico = PncpColetorService(cliente=cliente, nome_db=nome_db)
+    servico.executar_coleta(params_base=parametros)
     return True
