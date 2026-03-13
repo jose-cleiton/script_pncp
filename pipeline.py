@@ -507,13 +507,22 @@ class PncpPipeline:
         """
         self._classificacao.executar()
 
+    def _dataset_pronto(self) -> bool:
+        """Retorna True se existe pelo menos um dataset.csv disponível para treino."""
+        alvo = Path(self._config.caminho_dataset)
+        if alvo.exists():
+            return True
+        return bool(
+            sorted(Path("data/treinamento").glob("*/dataset.csv"), reverse=True)
+        )
+
     def executar_tudo(self) -> None:
         """
         Executa as 4 etapas em sequência.
 
-        Útil para reprocessamento completo quando o dataset já está rotulado.
-        Para um primeiro ciclo, use os métodos individuais para rotular
-        manualmente após `exportar_para_rotular()`.
+        Se o dataset ainda não foi rotulado, executa apenas coleta + exportação
+        e orienta o usuário a rotular o CSV antes de continuar.
+        Para reprocessamento completo (dataset já existente), executa tudo.
         """
         print(f"\n{'#' * 60}")
         print(f"  PIPELINE PNCP — {self._config.data}")
@@ -521,6 +530,26 @@ class PncpPipeline:
 
         self.coletar()
         self.exportar_para_rotular()
+
+        if not self._dataset_pronto():
+            print("\n" + "=" * 60)
+            print("  AÇÃO NECESSÁRIA — rotulação manual")
+            print("=" * 60)
+            print(
+                f"\nO dataset ainda não foi rotulado. Siga os passos abaixo:\n\n"
+                f"  1. Abra o arquivo no Excel / LibreOffice / Google Sheets:\n"
+                f"     {self._config.caminho_para_rotular}\n\n"
+                f"  2. Preencha a coluna 'Relevante':\n"
+                f"       1 → licitação relevante\n"
+                f"       0 → licitação não relevante\n\n"
+                f"  3. Salve como:\n"
+                f"     {self._config.caminho_dataset}\n\n"
+                f"  4. Retome o pipeline:\n"
+                f"     python main.py --etapa treinar\n"
+                f"     python main.py --etapa classificar\n"
+            )
+            return
+
         self.treinar()
         self.classificar()
 
