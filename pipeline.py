@@ -35,6 +35,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 import joblib
@@ -248,6 +249,9 @@ class TreinamentoStage:
 
     Responsabilidade única: ler o dataset.csv, pré-processar, treinar o pipeline
     sklearn (TF-IDF + SGD), avaliar e salvar o modelo em disco.
+
+    Se o dataset da data atual não existir, busca automaticamente o mais
+    recente disponível em data/treinamento/*/dataset.csv.
     """
 
     def __init__(self, config: PipelineConfig) -> None:
@@ -255,22 +259,57 @@ class TreinamentoStage:
         self._preprocessor = TextPreprocessor()
 
     def executar(self) -> None:
-        """Treina e salva o modelo. Lança FileNotFoundError se o dataset não existir."""
+        """Treina e salva o modelo. Lança FileNotFoundError se nenhum dataset existir."""
         print("=" * 60)
         print("ETAPA 3 — TREINAMENTO DO MODELO")
         print("=" * 60)
-        print(f"Dataset : {self._config.caminho_dataset}")
         print(f"Modelo  : {self._config.caminho_modelo}")
 
-        df = self._carregar_dataset()
+        caminho = self._resolver_dataset()
+        df = self._carregar_dataset(caminho)
         X_train, X_test, y_train, y_test = self._preparar_dados(df)
         modelo = self._treinar(X_train, y_train)
         self._avaliar(modelo, X_test, y_test)
         self._salvar_modelo(modelo)
 
-    def _carregar_dataset(self) -> pd.DataFrame:
-        """Lê o CSV rotulado e valida a presença das colunas esperadas."""
-        df = pd.read_csv(self._config.caminho_dataset)
+    def _resolver_dataset(self) -> Path:
+        """
+        Retorna o caminho do dataset a usar.
+
+        Prioridade:
+          1. data/treinamento/{data}/dataset.csv  (data configurada)
+          2. data/treinamento/*/dataset.csv mais recente disponível
+
+        Raises:
+            FileNotFoundError: se nenhum dataset for encontrado.
+        """
+        alvo = Path(self._config.caminho_dataset)
+
+        if alvo.exists():
+            print(f"Dataset : {alvo}")
+            return alvo
+
+        disponiveis = sorted(
+            Path("data/treinamento").glob("*/dataset.csv"), reverse=True
+        )
+        if disponiveis:
+            encontrado = disponiveis[0]
+            print(
+                f"AVISO: dataset não encontrado em '{alvo}'.\n"
+                f"  Usando o mais recente disponível: {encontrado}"
+            )
+            return encontrado
+
+        raise FileNotFoundError(
+            f"Nenhum dataset.csv encontrado.\n"
+            f"Execute 'python main.py --etapa exportar', rotule o arquivo em\n"
+            f"'{self._config.caminho_para_rotular}' e salve como\n"
+            f"'{self._config.caminho_dataset}'."
+        )
+
+    def _carregar_dataset(self, caminho: Path) -> pd.DataFrame:
+        """Lê o CSV rotulado e exibe o balanceamento das classes."""
+        df = pd.read_csv(caminho)
         print(f"\n✓ Dataset carregado: {len(df)} exemplos")
         print(df["Relevante"].value_counts().to_string())
         return df
