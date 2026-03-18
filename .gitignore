@@ -1,0 +1,47 @@
+# Arquivos de dados e artefatos gerados localmente
+dataset_para_rotular.csv
+pncp_data.db
+
+# Variáveis de ambiente — NUNCA faça commit do .env
+.env
+
+# Export específicos (quando aplicável)
+data/coleta/**/contratacoes_export.csv
+
+# Tipos de artefatos gerados/temporários
+*.csv
+*.db
+*.json
+*.xlsx
+*.log
+*.zip
+*.bak
+*.joblib
+
+# Dependências/manifestos que você quer manter fora do repo localmente
+requirements.txt
+
+# Ignorar caches e arquivos de sistema
+__pycache__/
+.DS_Store
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Model checkpoints, weights and training artifacts (do not commit large binaries)
+modelo_classificador/
+results/
+*.safetensors
+*.pt
+*.bin
+training_args.bin
+
+# Hugging Face cache (optional)
+~/.cache/huggingface/
+relatorio_licitacoes_pncp_paisagem.pdf
+*.pdf
