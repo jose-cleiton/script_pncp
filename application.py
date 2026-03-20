@@ -24,6 +24,7 @@ class PncpApplication:
         provedor: str = "openai",
         modelo: Optional[str] = None,
         workers: int = 1,
+        modo: str = "publicacao",
     ) -> None:
         """
         Args:
@@ -32,12 +33,17 @@ class PncpApplication:
             provedor: Provedor LLM para classificar_gpt (openai ou gemini).
             modelo:   Modelo LLM. Se None, usa o padrão do provedor.
             workers:  Número de workers paralelos para classificar_gpt.
+            modo:     Endpoint da API: 'publicacao' ou 'proposta'.
         """
         self._etapa = etapa
         self._provedor = provedor
         self._modelo = modelo
         self._workers = workers
-        config = PipelineConfig() if data is None else PipelineConfig(data=data)
+        config = (
+            PipelineConfig(modo=modo)
+            if data is None
+            else PipelineConfig(data=data, modo=modo)
+        )
         self._pipeline = PncpPipeline(config)
 
     def executar(self) -> None:

@@ -35,6 +35,7 @@ def main() -> None:
         provedor=args.provedor,
         modelo=args.modelo,
         workers=args.workers,
+        modo=args.modo,
     ).executar()
 
 

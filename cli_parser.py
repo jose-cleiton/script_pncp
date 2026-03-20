@@ -14,6 +14,7 @@ _ETAPAS_DISPONIVEIS = (
 )
 
 _PROVEDORES_DISPONIVEIS = ("openai", "gemini")
+_MODOS_DISPONIVEIS = ("publicacao", "proposta")
 
 
 class CliParser:
@@ -67,6 +68,17 @@ class CliParser:
                 "Número de workers paralelos para classificar_gpt. "
                 "1 = sequencial (padrão). "
                 "Aumente com cuidado para não exceder o rate limit da API."
+            ),
+        )
+        self._parser.add_argument(
+            "--modo",
+            choices=_MODOS_DISPONIVEIS,
+            default="publicacao",
+            help=(
+                "Endpoint da API PNCP a usar na etapa coletar. "
+                "'publicacao' (padrão): filtra por dataInicial, dataFinal e "
+                "modalidade. "
+                "'proposta': filtra apenas por dataFinal — mais abrangente."
             ),
         )
 

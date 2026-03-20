@@ -80,10 +80,12 @@ class PipelineConfig:
 
     # --- API ---
     base_url: str = "https://pncp.gov.br/api/consulta"
-    # Por padrão vamos consultar o endpoint de publicações, que permite
-    # filtrar por intervalo de datas (dataInicial/dataFinal). Isso aproxima a
-    # coleta do exemplo: /v1/contratacoes/publicacao?dataInicial=YYYYMMDD&dataFinal=YYYYMMDD
-    endpoint: str = "/v1/contratacoes/publicacao"
+
+    # Modo de consulta:
+    #   "publicacao" → /v1/contratacoes/publicacao  (filtra por dataInicial + dataFinal + modalidade)
+    #   "proposta"   → /v1/contratacoes/proposta    (filtra apenas por dataFinal — mais abrangente)
+    modo: str = "publicacao"
+
     codigo_modalidade: int = 6
     tamanho_pagina: int = 50
     pausa_entre_paginas: float = 0.5
@@ -93,6 +95,20 @@ class PipelineConfig:
 
     # --- Caminhos (derivados de `data`) ---
     @property
+    def endpoint(self) -> str:
+        """Endpoint da API de acordo com o modo selecionado."""
+        _endpoints = {
+            "publicacao": "/v1/contratacoes/publicacao",
+            "proposta": "/v1/contratacoes/proposta",
+        }
+        if self.modo not in _endpoints:
+            raise ValueError(
+                f"Modo inválido '{self.modo}'. "
+                f"Escolha entre: {list(_endpoints.keys())}"
+            )
+        return _endpoints[self.modo]
+
+    @property
     def url_completa(self) -> str:
         return self.base_url + self.endpoint
 
@@ -101,17 +117,22 @@ class PipelineConfig:
         """Parâmetros base para a requisição à API (sem 'pagina')."""
         from datetime import datetime
 
-        # Usa a data configurada em `self.data` como dataFinal. Define
-        # dataInicial como o primeiro dia do mesmo mês — assim a coleta
-        # busca todo o mês até a data configurada (como no exemplo 20260301..20260314).
         dt = datetime.strptime(self.data, "%Y-%m-%d")
         data_final = int(dt.strftime("%Y%m%d"))
-        data_inicial = int(dt.replace(day=1).strftime("%Y%m%d"))
 
+        if self.modo == "publicacao":
+            # Filtra pelo dia exato (dataInicial = dataFinal = data).
+            return {
+                "dataInicial": data_final,
+                "dataFinal": data_final,
+                "codigoModalidadeContratacao": self.codigo_modalidade,
+                "pagina": 1,
+                "tamanhoPagina": self.tamanho_pagina,
+            }
+
+        # modo "proposta": endpoint mais abrangente — só precisa de dataFinal.
         return {
-            "dataInicial": data_final,
             "dataFinal": data_final,
-            "codigoModalidadeContratacao": self.codigo_modalidade,
             "pagina": 1,
             "tamanhoPagina": self.tamanho_pagina,
         }
