@@ -346,7 +346,9 @@ def extrair_registros(
 
     Retorna uma lista de dicionários com as chaves padronizadas.
     """
-    sql = f"SELECT * FROM {tabela} ORDER BY id"
+    colunas_tabela = [c["name"] for c in conn.execute(f"PRAGMA table_info({tabela})").fetchall()]
+    ordem = "id" if "id" in colunas_tabela else "numero_controle_pncp" if "numero_controle_pncp" in colunas_tabela else "rowid"
+    sql = f"SELECT * FROM {tabela} ORDER BY {ordem}"
     if limite:
         sql += f" LIMIT {limite}"
 
@@ -388,9 +390,9 @@ def extrair_registros(
 
         registro = {
             # Identificação
-            "pncp_id": base.get("pncp_id") or _safe(dados, "numeroControlePNCP"),
+            "pncp_id": base.get("pncp_id") or base.get("numero_controle_pncp") or _safe(dados, "numeroControlePNCP"),
             "numero_controle": _safe(dados, "numeroControlePNCP")
-            or base.get("pncp_id", ""),
+            or base.get("pncp_id", "") or base.get("numero_controle_pncp", ""),
             "ano_compra": _safe(dados, "anoCompra"),
             "sequencial_compra": _safe(dados, "sequencialCompra"),
             "numero_compra": _safe(dados, "numeroCompra"),
@@ -409,10 +411,10 @@ def extrair_registros(
             # Modalidade / situação
             "modalidade": _safe(dados, "modalidadeNome"),
             "modo_disputa": _safe(dados, "modoDisputaNome"),
-            "situacao": _safe(dados, "situacaoCompraNome"),
+            "situacao": _safe(dados, "situacaoCompraNome") or base.get("situacao_nome"),
             "instrumento": _safe(dados, "tipoInstrumentoConvocatorioNome"),
             # Valores
-            "valor_estimado": _safe(dados, "valorTotalEstimado"),
+            "valor_estimado": _safe(dados, "valorTotalEstimado") or base.get("valor_estimado"),
             "valor_homologado": _safe(dados, "valorTotalHomologado"),
             # Datas
             "data_abertura": _safe(dados, "dataAberturaProposta"),
