@@ -36,6 +36,7 @@ def main() -> None:
         modelo=args.modelo,
         workers=args.workers,
         modo=args.modo,
+        banco_origem=args.banco_origem,
     ).executar()
 
 

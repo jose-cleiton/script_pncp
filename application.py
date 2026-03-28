@@ -25,6 +25,7 @@ class PncpApplication:
         modelo: Optional[str] = None,
         workers: int = 1,
         modo: str = "publicacao",
+        banco_origem: Optional[str] = None,
     ) -> None:
         """
         Args:
@@ -39,6 +40,7 @@ class PncpApplication:
         self._provedor = provedor
         self._modelo = modelo
         self._workers = workers
+        self._banco_origem = banco_origem
         config = (
             PipelineConfig(modo=modo)
             if data is None
@@ -55,6 +57,7 @@ class PncpApplication:
                 provedor=self._provedor,
                 modelo=self._modelo,
                 workers=self._workers,
+                banco_origem=self._banco_origem,
             )
         else:
             acoes = {

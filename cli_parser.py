@@ -71,6 +71,17 @@ class CliParser:
             ),
         )
         self._parser.add_argument(
+            "--banco-origem",
+            dest="banco_origem",
+            default=None,
+            metavar="CAMINHO",
+            help=(
+                "Caminho para o arquivo SQLite de origem a ser usado "
+                "na etapa classificar_gpt. Se omitido, usa o caminho "
+                "derivado de --data: data/coleta/{YYYY-MM-DD}/pncp_data.db."
+            ),
+        )
+        self._parser.add_argument(
             "--modo",
             choices=_MODOS_DISPONIVEIS,
             default="publicacao",

@@ -46,7 +46,20 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Iterator
 
-from openai import OpenAI, APIError, RateLimitError, APITimeoutError
+# Tornar import opcional para que quem use apenas Gemini não precise instalar
+# o pacote `openai`. Se o import falhar, definimos um flag e valores
+# substitutos; o erro real será lançado quando alguém tentar instanciar o
+# classificador OpenAI.
+try:
+    from openai import OpenAI, APIError, RateLimitError, APITimeoutError
+
+    _HAS_OPENAI = True
+except Exception:  # pragma: no cover - ambiente sem openai
+    OpenAI = None
+    APIError = Exception
+    RateLimitError = Exception
+    APITimeoutError = Exception
+    _HAS_OPENAI = False
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -240,6 +253,23 @@ class BancoPncpReader:
             )
         self._caminho_db = caminho_db
         self._tamanho_pagina = tamanho_pagina
+        # Detecta esquema da tabela `contratacoes` para suportar variantes
+        # (alguns DBs armazenam colunas planas; outros apenas `dados_json`).
+        self._usar_dados_json = False
+        try:
+            with sqlite3.connect(self._caminho_db) as conn:
+                cols = [
+                    r[1]
+                    for r in conn.execute("PRAGMA table_info(contratacoes);").fetchall()
+                ]
+            # Se não existir coluna pncp_id ou objeto_compra, usaremos dados_json
+            if not ("pncp_id" in cols and "objeto_compra" in cols):
+                self._usar_dados_json = True
+        except Exception:
+            # Em caso de erro ao inspecionar (tabela inexistente etc.), deixamos
+            # o comportamento padrão — o erro real será lançado mais adiante
+            # ao tentar consultar a tabela.
+            self._usar_dados_json = False
 
     # ------------------------------------------------------------------
     # API pública
@@ -275,18 +305,83 @@ class BancoPncpReader:
                     if restam <= 0:
                         break
                     buscar = min(buscar, restam)
-                rows = conn.execute(self._SQL_PAGINA, (buscar, pos)).fetchall()
-                if not rows:
-                    break
-                for row in rows:
-                    yield ContratacaoRow(
-                        pncp_id=row["pncp_id"] or "",
-                        orgao_nome=row["orgao_nome"] or "",
-                        uf_sigla=row["uf_sigla"] or "",
-                        objeto_compra=row["objeto_compra"] or "",
-                        dados_json=row["dados_json"] or "{}",
-                    )
-                    lidos += 1
+                if not self._usar_dados_json:
+                    # esquema esperado: colunas planas (pncp_id, objeto_compra, ...)
+                    # Algumas bases podem não ter essas colunas (erro SQLite
+                    # "no such column: pncp_id"). Fazemos uma tentativa e,
+                    # em caso de OperationalError, ativamos o fallback para
+                    # `dados_json` de forma resiliente.
+                    try:
+                        rows = conn.execute(self._SQL_PAGINA, (buscar, pos)).fetchall()
+                    except sqlite3.OperationalError as exc:
+                        # Detectamos esquema diferente em tempo de execução;
+                        # ligamos o modo `dados_json` e reiniciamos a iteração
+                        # nesta mesma posição.
+                        logger.warning(
+                            "Banco com esquema diferente: %s — usando dados_json fallback",
+                            exc,
+                        )
+                        self._usar_dados_json = True
+                        continue
+
+                    if not rows:
+                        break
+                    for row in rows:
+                        yield ContratacaoRow(
+                            pncp_id=row["pncp_id"] or "",
+                            orgao_nome=row["orgao_nome"] or "",
+                            uf_sigla=row["uf_sigla"] or "",
+                            objeto_compra=row["objeto_compra"] or "",
+                            dados_json=row["dados_json"] or "{}",
+                        )
+                        lidos += 1
+                else:
+                    # esquema alternativo: apenas `dados_json` contém o objeto
+                    rows = conn.execute(
+                        "SELECT dados_json FROM contratacoes ORDER BY rowid LIMIT ? OFFSET ?",
+                        (buscar, pos),
+                    ).fetchall()
+                    if not rows:
+                        break
+                    for row in rows:
+                        dados_text = row[0] or "{}"
+                        try:
+                            obj = json.loads(dados_text)
+                        except Exception:
+                            obj = {}
+
+                        # Mapeamento defensivo: nomes comuns no JSON
+                        pncp_id = (
+                            obj.get("numeroControlePNCP")
+                            or obj.get("numero_controle_pncp")
+                            or ""
+                        )
+                        orgao_nome = (
+                            obj.get("orgaoNome")
+                            or (obj.get("orgaoEntidade") or {}).get("razaoSocial")
+                            or (obj.get("unidadeOrgao") or {}).get("nomeUnidade")
+                            or obj.get("orgao_nome")
+                            or ""
+                        )
+                        uf_sigla = (
+                            obj.get("uf")
+                            or (obj.get("unidadeOrgao") or {}).get("ufSigla")
+                            or obj.get("ufSigla")
+                            or obj.get("uf_sigla")
+                            or ""
+                        )
+                        objeto_compra = (
+                            obj.get("objetoCompra") or obj.get("objeto_compra") or ""
+                        )
+
+                        yield ContratacaoRow(
+                            pncp_id=str(pncp_id),
+                            orgao_nome=str(orgao_nome),
+                            uf_sigla=str(uf_sigla),
+                            objeto_compra=str(objeto_compra),
+                            dados_json=dados_text,
+                        )
+                        lidos += 1
                 pos += len(rows)
 
 
@@ -315,6 +410,11 @@ class GptClassificador(ClassificadorBase):
         if not chave:
             raise EnvironmentError(
                 "OPENAI_API_KEY não definida.\n" "Defina: export OPENAI_API_KEY=sk-..."
+            )
+        if not _HAS_OPENAI:
+            raise ImportError(
+                "Pacote 'openai' não encontrado. Instale com: "
+                "python -m pip install openai"
             )
         self._client = OpenAI(api_key=chave)
         self._modelo = modelo
@@ -778,13 +878,21 @@ class GptClassificacaoStage:
         enviados = contadores["processados"] + ja_antes
         pct = (enviados / total_origem * 100) if total_origem else 0
         total_banco = self._escritor.contar()
+        faltam = max(0, total_origem - enviados)
+        # contadores['relevantes'] conta quantos foram salvos nesta execução
+        salvos_exec = contadores.get("relevantes", 0)
         logger.info(
-            "Progresso: %d/%d (%.1f%%) | salvos no banco=%d | erros=%d",
+            "Prog: %d/%d (%.1f%%) | faltam=%d | proc_run=%d | rel_run=%d | "
+            "bank_total=%d | errs=%d | pul=%d",
             enviados,
             total_origem,
             pct,
+            faltam,
+            contadores.get("processados", 0),
+            salvos_exec,
             total_banco,
-            contadores["erros"],
+            contadores.get("erros", 0),
+            contadores.get("pulados", 0),
         )
 
     def _relatorio_final(self, contadores: dict, total_origem: int) -> None:
@@ -793,8 +901,14 @@ class GptClassificacaoStage:
         print("RELATÓRIO FINAL — CLASSIFICAÇÃO GPT")
         print("=" * 60)
         print(f"  Total no banco de origem  : {total_origem}")
+        ja = self._progresso.total()
+        enviados = contadores["processados"] + ja
+        faltam = max(0, total_origem - enviados)
         print(f"  Pulados (já processados)  : {contadores['pulados']}")
         print(f"  Processados nesta execução: {contadores['processados']}")
+        print(f"  Enviados (total): {enviados}")
+        print(f"  Faltam processar           : {faltam}")
         print(f"  Erros de API              : {contadores['erros']}")
+        print(f"  Relev. nesta exec         : {contadores.get('relevantes', 0)}")
         print(f"  Relevantes salvos (total) : {self._escritor.contar()}")
         print("=" * 60)

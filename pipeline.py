@@ -552,6 +552,7 @@ class PncpPipeline:
         provedor: str = "openai",
         modelo: Optional[str] = None,
         workers: int = 1,
+        banco_origem: Optional[str] = None,
     ) -> None:
         """
         Executa a Etapa 5: classificação via LLM (OpenAI ou Gemini).
@@ -569,13 +570,16 @@ class PncpPipeline:
             - banco de coleta populado (execute `coletar()` antes)
             - OPENAI_API_KEY ou GEMINI_API_KEY definidas conforme o provedor
         """
+        # Permite sobrescrever o caminho do DB de origem via argumento.
+        caminho_db_origem = banco_origem or self._config.caminho_db
+
         if workers > 1:
             from classificar_gpt_paralelo import (
                 GptClassificacaoParalelaStage,
             )
 
             stage = GptClassificacaoParalelaStage(
-                banco_origem=self._config.caminho_db,
+                banco_origem=caminho_db_origem,
                 banco_destino=self._config.caminho_db_filtrado_gpt,
                 provedor=provedor,
                 modelo=modelo,
@@ -585,7 +589,7 @@ class PncpPipeline:
             from classificar_gpt import GptClassificacaoStage
 
             stage = GptClassificacaoStage(
-                banco_origem=self._config.caminho_db,
+                banco_origem=caminho_db_origem,
                 banco_destino=self._config.caminho_db_filtrado_gpt,
                 provedor=provedor,
                 modelo=modelo,
