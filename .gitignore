@@ -45,3 +45,5 @@ training_args.bin
 ~/.cache/huggingface/
 relatorio_licitacoes_pncp_paisagem.pdf
 *.pdf
+data/resultado/2026-03-25/pncp_filtrado_gpt.db-shm
+data/resultado/2026-03-25/pncp_filtrado_gpt.db-wal
